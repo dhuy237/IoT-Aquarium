@@ -1,6 +1,6 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
-
+//Huy
 #define OLED_ADDR   0x3C
 #if (SSD1306_LCDHEIGHT != 64)
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
