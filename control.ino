@@ -13,7 +13,7 @@ int a, b;
 int time;
 byte menuCount = 1;
 
-static const unsigned char PROGMEM logo16_glcd_bmp[] =
+static const unsigned char PROGMEM logo16_glcd_bmp[] =  //logo cua adafruit
 { B00000000, B11000000,
   B00000001, B11000000,
   B00000001, B11000000,
@@ -57,7 +57,7 @@ void menuScreen()
 {
   display.setTextSize(1);
   display.setTextColor(WHITE);
-  display.setCursor(10, 0);
+  display.setCursor(10, 0); //set vi tri display text, 10 la x-axis, 0 la y-axis
   display.println("Main Menu");
   //------------------------------
   display.setCursor(10, 20);
