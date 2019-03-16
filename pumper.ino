@@ -1,7 +1,7 @@
 #define MAX_DISTANCE 25
 
 //pin declearation 
-int relay = 10; 
+int relay = 10; //Khuong
 int pin_trig = 8;
 int pin_echo = 7;
 
