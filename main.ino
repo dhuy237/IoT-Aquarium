@@ -1,265 +1,250 @@
-//Khoa Truong
-#include <PubSubClient.h>
-#include <WiFiClient.h>
+#include <NTP.h>
 #include <ESP8266WiFi.h>
-#include <Servo.h>
+#include <PubSubClient.h>
+#include <WiFiUdp.h>
+#include <Wire.h>
 #include <time.h>
-#include <WiFiUdp.h> 
-#include <NTPClient.h>
-//--------------------------------------------------------------------------------------------------//
-//                                        SUMMARIZE ALL METHODS
-//--------------------------------------------------------------------------------------------------//
-void set_time(String temp_state);                                     // set time for programs' clock
-int check_match_time();                                               // check time of real clock with time in plant for feeding
-void count_clock();                                                   // count clock.
-void decode_signal(String temp_state);                                // decode list time of plant for feeding from the server to save it in program
-void auto_feeding();                                                  // call this method to feed fish
-void reset_time_feeding();                                            // delete list time of auto feeding
-void receive_Infor(char*tp, byte * nd, unsigned int length);          
+#include <sche2.h>
+#include <ACROBOTIC_SSD1306.h>
+#include <buttonana.h>
+#include <pump_and_feeding.h>
+#include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>
+#include <SoftwareSerial.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-//--------------------------------------------------------------------------------------------------//
-//                                        ALL STRUCTS AND GLOBAL VARIANCES
-//--------------------------------------------------------------------------------------------------//
-struct timeFeeding{
-    int* elements;
-    int num_of_time=0;
-};
-timeFeeding time_feeding;                                             // list time of auto feeding include the number and list
 
-struct time_tank{
-  int hour=0;
-  int minute=0;
-  int second=0;
-};                                                            
-time_tank tot;                                                        // clock
-int check_time=0;     // check whether you update real time for program yet or not
-int check_auto=0;     // if there is plant for feeding fish, check_auto=1 else=0
-int allow_feed=1;     // used to feed fish follow plant. EX: when the clock reach the setup time for auto feeding, we call auto_feeding and allow_feed=0 to ensure
-                      // auto_feeding called only once time. and when the clock change to next minute, allow_feed =1. 
-
-//--------------------------------------------------------------------------------------------------//
-//                                                  SET UP
-//--------------------------------------------------------------------------------------------------//
+//Declare global variable:
+sche2 Sche;
+void getdata(char * topic, byte *content, unsigned int length_of_content) {
+    Sche.getdata(topic, content, length_of_content);
+} 
+int state[4] = {0}; // 
+int state_num[4] = {8,3,4,4};
+int curs = 0;
+int mouse;
+int wifiset = 0;
+String screen[4][8];
+int _cmd;
+String unit[3] = {"C", "F", "K"};
+void display_screen() {
+  Serial.println(state[3] * 100 + state[2] * 10 + _cmd + 1000);
+  oled.setTextXY(0,0);
+  oled.putString("Wifi: ");
+  oled.putString(WiFi.status()!=WL_CONNECTED? " Disconnected" : " Connected");
+  oled.setTextXY(1,1);
+  oled.putString(screen[0][state[0]]);
+  oled.setTextXY(2,1);
+  oled.putString(screen[1][state[1]].substring(0,20));
+  oled.setTextXY(3,1);
+  oled.putString(screen[2][state[2]]);
+  oled.setTextXY(4,1);
+  oled.putString(screen[3][state[3]]);
+  oled.setTextXY(curs + 1,0);
+  oled.putString(">");
+  for(int i=1;i<=4;i++) 
+    if(i != curs + 1) {
+      oled.setTextXY(i,0);
+      oled.putString(" ");
+  }   
+}
+int Current_second;
+int diw;
+int _time;
+SoftwareSerial s(3,1);
+buttonana switc(A0, 200, 500, 950);
+buttonana select(A0, 200, 950, 1300);
 WiFiUDP u;
-Servo motor;
-WiFiClient cli;
-PubSubClient MQTT("m16.cloudmqtt.com",16357,receive_Infor,cli);
+WiFiClient _client;
+NTPClient timeClient(u,"0.asia.pool.ntp.org",25200);
+PubSubClient a("m16.cloudmqtt.com", 12224, getdata, _client);
+pump_and_feeding pf(D4, D5, D6, D7, D8, 22, 44, 50);
+OneWire oneWire(D4);
+DallasTemperature sensors(&oneWire);
 
-//--------------------------------------------------------------------------------------------------//
-//                                                  SET_TIME
-//--------------------------------------------------------------------------------------------------//
-void Set_Time(String temp_state)
-{
-  tot.hour=0;
-  tot.minute=0;
-  tot.second=0;
-  for (int i=0; i <=1; i++) tot.hour+=(temp_state[i]-48)*pow(10,1-i);
-  for (int i=3; i <=4; i++) tot.minute+=(temp_state[i]-48)*pow(10,4-i); 
-}
-//--------------------------------------------------------------------------------------------------//
-//                                                  CHECK_MATCH_TIME
-//--------------------------------------------------------------------------------------------------//
-int check_match_time()
-{
-  for (int i=0; i<time_feeding.num_of_time; i++)
-  {
-    int temp=tot.hour*100+tot.minute;
-    if (temp==time_feeding.elements[i]) return 1;
-  }
-  return 0;
-}
-//--------------------------------------------------------------------------------------------------//
-//                                                  COUNT_CLOCK
-//--------------------------------------------------------------------------------------------------//
-void count_clock()
-{
-  tot.second++;
-  if (tot.second==60) 
-  {
-      tot.minute++;
-    allow_feed=1;
-    tot.second=0;
-    if (tot.minute==60)
-    {
-      tot.hour++;
-      tot.minute=0;
-      if (tot.hour==24) tot.hour=0;  
-    }
-  }
-}
-//--------------------------------------------------------------------------------------------------//
-//                                                  DECODE_SIGNAL
-//--------------------------------------------------------------------------------------------------//
-void decode_signal(String temp_state)
-{
-  check_auto=1;
-  time_feeding.num_of_time =0;
-  int dem = 0;
-  int vtr_num_of_time = temp_state.indexOf('_');                          // get the location of the first '_' character
-  int vtr_end_num_of_time = temp_state.indexOf('_',vtr_num_of_time+1);    // get the location of the second '_' character
-  
-  for (int i = vtr_num_of_time + 1; i <= vtr_end_num_of_time-1; i++)
-      time_feeding.num_of_time += (temp_state[i]-48) * pow(10, vtr_end_num_of_time - 1 - i);    //get the number of time 
-  
-  time_feeding.elements= new int [time_feeding.num_of_time];              // create a matrix contained elements of auto-feeding time
-  
-  dem = -1;
-  int* vtr;      // array contained the position of '_' from vtr_end_num_of_time to the end
-  vtr= new int[time_feeding.num_of_time];
-  for (int i=vtr_end_num_of_time+1; i<temp_state.length();i++)
-    if (temp_state[i] == '_') 
-      { dem++; 
-        vtr[dem] = i; 
-      }
-  dem++;
-  vtr[dem] = temp_state.length();
-  
-  int dem1 = 0;
-  for (int i = 0; i < time_feeding.num_of_time; i++) time_feeding.elements[i] = 0;
-  for (int i = vtr_end_num_of_time + 1; i < temp_state.length(); i++)
-  {
-    if (temp_state[i] != '_') time_feeding.elements[dem1] = time_feeding.elements[dem1]+ (temp_state[i] - 48)*pow(10, vtr[dem1] - 1 - i);
-    else dem1++;
-  }
- delete[]vtr;
-}
-
-//--------------------------------------------------------------------------------------------------//
-//                                                  AUTO_FEEDING
-//--------------------------------------------------------------------------------------------------//
-void auto_feeding()
-{
-     /*//-----------open the box--------------
-     for (int i=0; i<=25; i++)
-     {
-      motor.write(i);
-      delay(25);
-     }
-      //----------------close the box-------------
-     for (int i=25; i>=0; i--)
-     {
-      motor.write(i);
-      delay(25);
-     }
-     //----------------------------------------time-------------*/
-  
-  char time_char[10]="";    // array demonstrate the real time
-  int temp_hour=tot.hour;
-  int temp_minute=tot.minute;
-  int d=2;
-  //------------------------------------------------------
-  //              change the real time into array of char 
-  //------------------------------------------------------
-  if (temp_hour<10)
-  {
-    time_char[0]='0';
-    time_char[1]=temp_hour+48;
-  }else 
-  do
-  {
-    d--;
-    char i=(temp_hour%10)+48;
-    time_char[d]=i;
-    temp_hour=temp_hour/10;
-  }while(temp_hour>0);
-  //-----------------------------------------
-  time_char[2]=':';
-  d=5;
-  //-----------------------------------------
-  if (temp_minute<10)
-  {
-    time_char[3]='0';
-    time_char[4]=temp_minute+48;
-  }else
-  do
-  {
-    d--;
-    char i=(temp_minute%10)+48;
-    time_char[d]=i;
-    temp_minute=temp_minute/10;
-  }while(temp_minute>0);
-  //------------------------------------------
-  //------------------------------------------
-  char final_char[100]="You have fed your Fish at ";
-  strcat(final_char,time_char);
-  MQTT.publish("NOTE",final_char);
-  Serial.println("...have fed fishes at.....");
-  
-}
-//--------------------------------------------------------------------------------------------------//
-//                                                  RESET_TIME_FEEDING
-//--------------------------------------------------------------------------------------------------//
-void reset_time_feeding()
-{
-  delete[]time_feeding.elements;
-  time_feeding.num_of_time=0;   
-  int check_auto=0;       // there is no plant for feeding
-}
-//--------------------------------------------------------------------------------------------------//
-//                                                  RECEIVE_INFOR
-//--------------------------------------------------------------------------------------------------//
-void receive_Infor(char*tp, byte * nd, unsigned int length)
-{
-    Serial.println("There is a message from server:");
-    Serial.print("number of time ");
-    Serial.println(time_feeding.num_of_time);
-    for (int i=0; i<time_feeding.num_of_time;i++) Serial.println(time_feeding.elements[i]);
-    String topic(tp);
-    String temp_state= String((char*)nd);
-    temp_state.remove(length);
-    
-    int state = int(temp_state[0])-48;  
-    if (topic=="Feeding_Fish")
-    {
-        if (state==1) auto_feeding();
-        if (state==2) decode_signal(temp_state);
-        if (state==3) reset_time_feeding();
-    }
-    else if (topic=="Set_Time") {Set_Time(temp_state); check_time=1;}
-    Serial.print(tot.hour); Serial.print(":"); Serial.print(tot.minute); Serial.print(":"); Serial.println(tot.second);
-}
+//------------------------------------------------------------------
 
 void setup() {
-   Serial.begin(115200);
-  
-  WiFi.begin("THREE O'CLOCK","3open24h");         
-  while (WiFi.status() != WL_CONNECTED)
-  {delay (50);
-  Serial.print(".");
-  }
-  Serial.println("Wifi is connected");
-  
-  while (1)
-  { delay (500);
-    if (!MQTT.connect("Aquatic Tank","bfglrgpa","Xu7o8LYQCn4y")) 
-    Serial.print(".");  
-    else break;
-  }
-  Serial.println("Connected to server");
-  MQTT.publish("List Features","Topic...................................Features");    
-  MQTT.publish("             ","Set_Time....................hh:mm");                  
-  MQTT.publish("             ","Feeding_Fish....................1: Auto Feeding");
-  MQTT.publish("             ","Feeding_Fish....................2: Set time for feeding.EX:hhmm");
-  MQTT.publish("             ","Feeding_Fish....................3: Reset time for feeding");
-                      
-  MQTT.publish("             ","Take_Temp.......................1: Take Temperature");
-  MQTT.publish("             ","Pumper..........................1: Release Water");
-  MQTT.publish("             ","Pumper..........................2: Pump Water");
-  MQTT.subscribe("Feeding_Fish");   
-  MQTT.subscribe("Set_Time");
-  MQTT.subscribe("Take_Temp"); 
-  MQTT.subscribe("Pumper");                                            
-  
-  //motor.attach(MOTOR_GATE);
+  Serial.begin(115200);
+  s.begin(115200);
+  Wire.begin(D2,D3);
+  oled.init();                      
+  oled.clearDisplay();    
+  for(int i=0;i<15;i++) {
+    oled.drawFrame(i);
+    delay(i * 100);
+  }          
+  WiFiManager wifiManager;
+  wifiManager.setConfigPortalTimeout(30);
+  oled.clearDisplay();
+  oled.setTextXY(1, 0);
+  oled.putString("configuring");
+  oled.setTextXY(2, 0);
+  oled.putString("Wifi...");
+  wifiManager.autoConnect("AquaWifi");
+  Serial.println("Connected!");
+  a.connect("test4", "dqdnpxhd", "hmuo2Lwny6jq");
+  a.subscribe("test");
+  timeClient.begin();
+  timeClient.update();
+  timeClient.setRTCTime();
+  //oled.drawFrame(i++);
+  //oled.clearDisplay();
+  //oled.drawFrame(i++);                          
+  screen[1][0] = "Temp: 29";
+  screen[2][0] = "Pump: Off        ";
+  screen[2][1] = "Pump: Pumping out ";
+  screen[2][2] = "Pump: Pumping in ";
+  screen[2][3] = "Pump: Auto       ";
+  screen[3][0] = "Feeding machine: Off    ";
+  screen[3][1] = "Feeding machine: Opening";
+  screen[3][2] = "Feeding machine: Closing";
+  screen[3][3] = "Feeding machine: Auto   ";
+  oled.clearDisplay();
+  oled.setTextXY(1, 0);
+  oled.putString("establishment");
+  oled.setTextXY(2, 0);
+  oled.putString("is");
+  oled.setTextXY(3, 0);
+  oled.putString("completed");
+  delay(500);   
+  oled.clearDisplay(); 
+  oled.setFont(font5x7); 
 }
-
+//------------------------------------------------------------------
 
 void loop() { 
-  MQTT.loop();
-  if (check_time)
-  {
-  if (check_auto==1 && check_match_time()==1 && allow_feed==1) { auto_feeding(); allow_feed=0;}
-  count_clock();
-  delay(1000);
+  if(WiFi.status()!= WL_CONNECTED) {
+    wifiset = 1;
   }
+  else if(wifiset == 1) {
+    //Serial.println(WiFi.status()== WL_CONNECTED);
+    wifiset = 0;
+    timeClient.update();
+    timeClient.setRTCTime();
+  }
+  if(Current_second != timeClient.getRTCTime(screen[0][1], screen[0][0], diw)) {
+    Current_second = timeClient.getRTCTime(screen[0][1], screen[0][0], diw);
+    sensors.gettemp(screen[1][0],screen[1][1],screen[1][2]);
+    if(Sche.diw != diw) {
+      Sche.diw = diw;
+      //Sche.upda();
+    }
+    display_screen();
+  }
+    a.loop();
+    _cmd = Sche.pop(screen[0][0]);
+    if(_cmd != 0)
+      Serial.println(state[3] * 100 + state[2] * 10 + _cmd + 1000);
+    switch(curs) {
+        case 0: {
+          switch(state[0]) {
+                case 0: {
+                    switc.pres(curs, 4, display_screen);
+                    select.pres(state[0], state_num[0], display_screen);
+                    break;
+                }
+                case 1: {
+                    switc.pres(curs, 4, display_screen);
+                    select.pres(state[0], state_num[0], display_screen);
+                    break;
+                }
+                case 2: {
+                    screen[0][3] = screen[0][0].substring(0,16) + 'Y' + 'N';
+                    mouse = 0;
+                    state[0]++;
+                    display_screen();
+                    break;
+                }
+                case 3: {
+                    select.pres(mouse, 12, display_screen);
+                    switch(mouse) {
+                        case 8: {
+                          mouse += 2;
+                          break;
+                        }
+                        case 10: {
+                          int cu = 0;
+                          switc.pres(cu, 2, display_screen);
+                            if (cu == 1)
+                              state[0] = 4;
+                            break;
+                        }
+                        case 11: {
+                          int cu = 0;
+                          switc.pres(cu, 2, display_screen);
+                            if (cu == 1)
+                              state[0] = 5;
+                            break;
+                        }
+                        default: {
+                          int cu = screen[0][3][mouse + 6] - '0';
+                          if(cu != ':' - '0' && mouse <8)
+                            switc.pres(cu, 10, display_screen);
+                          screen[0][3][mouse + 6] = cu + '0';
+                          break;
+                        }
+                    }
+                        oled.setTextXY(1,mouse + 7);
+                        oled.putString("_");
+                    break;
+                }
+                case 4: {
+                    timeClient.setRTCTime_offline(screen[0][1], screen[0][3]);
+                    state[0]++;
+                    break;
+                }
+                case 5: {
+                    screen[0][6] = screen[0][1].substring(0,16) + 'Y' + 'N';
+                    mouse = 0;
+                    state[0]++;
+                    display_screen();
+                    break;
+                }
+                case 6: {
+                    select.pres(mouse, 12, display_screen);
+                    switch(mouse) {
+                        case 10: {
+                          int cu = 0;
+                          switc.pres(cu, 2, display_screen);
+                            if (cu == 1)
+                              state[0] = 7;
+                            break;
+                        }
+                        case 11: {
+                          int cu = 0;
+                          switc.pres(cu, 2, display_screen);
+                            if (cu == 1)
+                              state[0] = 0;
+                            break;
+                        }
+                        default: {
+                          int cu = screen[0][6][mouse + 6] - '0';
+                          if(cu != '-' - '0' && mouse <10)
+                            switc.pres(cu, 10, display_screen);
+                          screen[0][6][mouse + 6] = cu + '0';
+                          break;
+                        }
+                    }
+                        oled.setTextXY(1,mouse + 7);
+                        oled.putString("_");
+                    break;
+                }
+                case 7: {
+                    timeClient.setRTCTime_offline(screen[0][6], screen[0][0]);
+                    state[0] = 0;
+                    break;
+                }
+          }
+          break;
+        }
+        default: {
+          switc.pres(curs, 4, display_screen);
+          select.pres(state[curs], state_num[curs], [&]{display_screen();Serial.println(state[3] * 100 + state[2] * 10 + _cmd + 1000);});
+          break;
+        }
+    }
 }
