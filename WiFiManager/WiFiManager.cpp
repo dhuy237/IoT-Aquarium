@@ -11,7 +11,6 @@
  **************************************************************/
 
 #include "WiFiManager.h"
-
 WiFiManagerParameter::WiFiManagerParameter(const char *custom) {
   _id = NULL;
   _placeholder = NULL;
@@ -222,9 +221,13 @@ boolean  WiFiManager::startConfigPortal(char const *apName, char const *apPasswo
 
   connect = false;
   setupConfigPortal();
-
+  int frame = 0;
+  Wire.begin(D2, D3);
+  //oled.init();
+  //oled.clearDisplay();
   while(1){
-
+    //oled.drawFrame(frame);
+    //frame = (frame + 1) % 15;
     // check if timeout
     if(configPortalHasTimeout()) break;
 

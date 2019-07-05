@@ -12,7 +12,7 @@ class sche2 {
         this->_capa = 10;
 	diw = 0;
         this->time_storage = new int[10];
-	_sdk.SDcheck();
+	//_sdk.SDcheck();
       }
       ~sche2() {
         delete[] time_storage;
@@ -45,7 +45,6 @@ class sche2 {
 	  memmove(time_storage + i + 1, time_storage + i, sizeof(int) * (_size - i));
 	  time_storage[i] = _time * 10 + _cmd;
 	  _size++;
-	  pri();
       }
 
       void del(int _time, int _cmd, int _diw) {
@@ -58,6 +57,7 @@ class sche2 {
 
       int pop(String Current_time) {
 	    int _time = (Current_time[6] - '0') * 1000 + (Current_time[7] - '0') * 100 + (Current_time[9] - '0') * 10 + (Current_time[10] - '0');
+	    //Serial.println(_time);
 	    if(_size > 0 && _time > time_storage[_size - 1] / 10)
 		this->_size--;
             if(_size > 0 && _time == time_storage[_size - 1] / 10) {
@@ -67,8 +67,7 @@ class sche2 {
             return 0;
       }
 
-      /*void upda(int _diw) {
-            this->diw = _diw;
+      void upda() {
 	    delete [] time_storage;
       	    _size = 0;
             _capa = 10;
@@ -82,7 +81,7 @@ class sche2 {
 				insert(_time, temp[k] - '0', diw);
 		}
 			
-      }*/
+      }
 
       void getdata(char * topic, byte *content, unsigned int length_of_content) {
 	 Serial.println("Recieved");

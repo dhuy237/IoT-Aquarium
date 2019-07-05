@@ -21,7 +21,7 @@ String SDprint(String filename) //print data in file
     if (myFile) {
         // read from the file until there's nothing else in it:
             temp = myFile.readStringUntil('\n');
-            Serial.println(temp);
+            //Serial.println(temp);
         myFile.close();
     }
     return temp;
